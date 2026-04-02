@@ -27,6 +27,9 @@ import (
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
+	"google.golang.org/adk/examples/lib/geminihelper"
+	"google.golang.org/adk/examples/lib/ollama"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/telemetry"
 	"google.golang.org/adk/tool"
@@ -42,21 +45,39 @@ import (
 func main() {
 	ctx := context.Background()
 
-	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{
-		APIKey: os.Getenv("GOOGLE_API_KEY"),
-	})
+	var llm model.LLM
+	var err error
+	if ollama.IsEnabled() {
+		llm, err = ollama.NewModel(ctx, ollama.ModelName())
+	} else {
+		llm, err = gemini.NewModel(ctx, geminihelper.ModelName(), &genai.ClientConfig{
+			APIKey: os.Getenv("GOOGLE_API_KEY"),
+		})
+	}
 	if err != nil {
 		log.Fatalf("Failed to create model: %v", err)
+	}
+	if !ollama.IsEnabled() {
+		log.Printf("gemini: using model %q", geminihelper.ModelName())
+	}
+
+	var searchTools []tool.Tool
+	if ollama.IsEnabled() {
+		searchTool, err := ollama.NewSearchTool(ctx)
+		if err != nil {
+			log.Fatalf("Failed to create search tool: %v", err)
+		}
+		searchTools = []tool.Tool{searchTool}
+	} else {
+		searchTools = []tool.Tool{geminitool.GoogleSearch{}}
 	}
 
 	searchAgent, err := llmagent.New(llmagent.Config{
 		Name:        "search_agent",
-		Model:       model,
+		Model:       llm,
 		Description: "Does google search.",
 		Instruction: "You're a specialist in Google Search.",
-		Tools: []tool.Tool{
-			geminitool.GoogleSearch{},
-		},
+		Tools:       searchTools,
 	})
 	if err != nil {
 		log.Fatalf("Failed to create agent: %v", err)
@@ -82,7 +103,7 @@ func main() {
 	}
 	poemAgent, err := llmagent.New(llmagent.Config{
 		Name:        "poem_agent",
-		Model:       model,
+		Model:       llm,
 		Description: "returns poem",
 		Instruction: "You return poems.",
 		Tools: []tool.Tool{
@@ -95,7 +116,7 @@ func main() {
 
 	a, err := llmagent.New(llmagent.Config{
 		Name:        "root_agent",
-		Model:       model,
+		Model:       llm,
 		Description: "You can do a google search and generate poems.",
 		Instruction: "Answer questions about weather based on google search unless asked for a poem," +
 			" for a poem generate it with a tool.",

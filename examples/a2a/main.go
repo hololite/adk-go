@@ -32,6 +32,9 @@ import (
 	"google.golang.org/adk/agent/remoteagent"
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
+	"google.golang.org/adk/examples/lib/geminihelper"
+	"google.golang.org/adk/examples/lib/ollama"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/server/adka2a"
@@ -42,19 +45,37 @@ import (
 
 // newWeatherAgent creates a simple LLM-agent as in the quickstart example.
 func newWeatherAgent(ctx context.Context) agent.Agent {
-	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{
-		APIKey: os.Getenv("GOOGLE_API_KEY"),
-	})
-	if err != nil {
-		log.Fatalf("Failed to create a model: %v", err)
+	var llm model.LLM
+	var err error
+	var tools []tool.Tool
+
+	if ollama.IsEnabled() {
+		llm, err = ollama.NewModel(ctx, ollama.ModelName())
+		if err != nil {
+			log.Fatalf("Failed to create Ollama model: %v", err)
+		}
+		searchTool, err := ollama.NewSearchTool(ctx)
+		if err != nil {
+			log.Fatalf("Failed to create search tool: %v", err)
+		}
+		tools = []tool.Tool{searchTool}
+	} else {
+		llm, err = gemini.NewModel(ctx, geminihelper.ModelName(), &genai.ClientConfig{
+			APIKey: os.Getenv("GOOGLE_API_KEY"),
+		})
+		if err != nil {
+			log.Fatalf("Failed to create a model: %v", err)
+		}
+		log.Printf("gemini: using model %q", geminihelper.ModelName())
+		tools = []tool.Tool{geminitool.GoogleSearch{}}
 	}
 
 	agent, err := llmagent.New(llmagent.Config{
 		Name:        "weather_time_agent",
-		Model:       model,
+		Model:       llm,
 		Description: "Agent to answer questions about the time and weather in a city.",
 		Instruction: "I can answer your questions about the time and weather in a city.",
-		Tools:       []tool.Tool{geminitool.GoogleSearch{}},
+		Tools:       tools,
 	})
 	if err != nil {
 		log.Fatalf("Failed to create an agent: %v", err)
