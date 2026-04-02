@@ -30,6 +30,8 @@ import (
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
+	"google.golang.org/adk/examples/lib/geminihelper"
+	"google.golang.org/adk/examples/lib/ollama"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/runner"
@@ -79,12 +81,21 @@ var (
 func main() {
 	ctx := context.Background()
 
-	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{})
+	var llm model.LLM
+	var err error
+	if ollama.IsEnabled() {
+		llm, err = ollama.NewModel(ctx, ollama.ModelName())
+	} else {
+		llm, err = gemini.NewModel(ctx, geminihelper.ModelName(), &genai.ClientConfig{})
+	}
 	if err != nil {
 		log.Fatalf("Failed to create model: %v", err)
 	}
+	if !ollama.IsEnabled() {
+		log.Printf("gemini: using model %q", geminihelper.ModelName())
+	}
 
-	vacationAgent, err := createRequestVacationDaysAgent(model)
+	vacationAgent, err := createRequestVacationDaysAgent(llm)
 	if err != nil {
 		log.Fatalf("Failed to create vacation agent: %v", err)
 	}

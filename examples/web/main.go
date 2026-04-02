@@ -28,6 +28,8 @@ import (
 	"google.golang.org/adk/artifact"
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
+	"google.golang.org/adk/examples/lib/geminihelper"
+	"google.golang.org/adk/examples/lib/ollama"
 	"google.golang.org/adk/examples/web/agents"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
@@ -41,6 +43,9 @@ func saveReportfunc(ctx agent.CallbackContext, llmResponse *model.LLMResponse, l
 		return llmResponse, llmResponseError
 	}
 	for _, part := range llmResponse.Content.Parts {
+		if part.Text == "" && part.InlineData == nil {
+			continue
+		}
 		_, err := ctx.Artifacts().Save(ctx, uuid.NewString(), part)
 		if err != nil {
 			return nil, err
@@ -66,28 +71,47 @@ func main() {
 	ctx := context.Background()
 	apiKey := os.Getenv("GOOGLE_API_KEY")
 
-	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{
-		APIKey: apiKey,
-	})
+	var llm model.LLM
+	var err error
+	if ollama.IsEnabled() {
+		llm, err = ollama.NewModel(ctx, ollama.ModelName())
+	} else {
+		llm, err = gemini.NewModel(ctx, geminihelper.ModelName(), &genai.ClientConfig{
+			APIKey: apiKey,
+		})
+	}
 	if err != nil {
 		log.Fatalf("Failed to create model: %v", err)
 	}
+	if !ollama.IsEnabled() {
+		log.Printf("gemini: using model %q", geminihelper.ModelName())
+	}
+
+	var weatherTools []tool.Tool
+	if ollama.IsEnabled() {
+		searchTool, err := ollama.NewSearchTool(ctx)
+		if err != nil {
+			log.Fatalf("Failed to create search tool: %v", err)
+		}
+		weatherTools = []tool.Tool{searchTool}
+	} else {
+		weatherTools = []tool.Tool{geminitool.GoogleSearch{}}
+	}
+
 	sessionService := session.InMemoryService()
 	rootAgent, err := llmagent.New(llmagent.Config{
 		Name:        "weather_time_agent",
-		Model:       model,
+		Model:       llm,
 		Description: "Agent to answer questions about the time and weather in a city.",
 		Instruction: "I can answer your questions about the time and weather in a city.",
-		Tools: []tool.Tool{
-			geminitool.GoogleSearch{},
-		},
+		Tools:       weatherTools,
 		AfterModelCallbacks: []llmagent.AfterModelCallback{saveReportfunc},
 	})
 	if err != nil {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
-	llmAuditor := agents.GetLLMAuditorAgent(ctx, model)
-	imageGeneratorAgent := agents.GetImageGeneratorAgent(ctx, model)
+	llmAuditor := agents.GetLLMAuditorAgent(ctx, llm)
+	imageGeneratorAgent := agents.GetImageGeneratorAgent(ctx, llm)
 
 	agentLoader, err := agent.NewMultiLoader(
 		rootAgent,

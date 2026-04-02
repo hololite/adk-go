@@ -31,6 +31,9 @@ import (
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
+	"google.golang.org/adk/examples/lib/geminihelper"
+	"google.golang.org/adk/examples/lib/ollama"
+	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/mcptoolset"
@@ -90,11 +93,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{
-		APIKey: os.Getenv("GOOGLE_API_KEY"),
-	})
+	var llm model.LLM
+	var err error
+	if ollama.IsEnabled() {
+		llm, err = ollama.NewModel(ctx, ollama.ModelName())
+	} else {
+		llm, err = gemini.NewModel(ctx, geminihelper.ModelName(), &genai.ClientConfig{
+			APIKey: os.Getenv("GOOGLE_API_KEY"),
+		})
+	}
 	if err != nil {
 		log.Fatalf("Failed to create model: %v", err)
+	}
+	if !ollama.IsEnabled() {
+		log.Printf("gemini: using model %q", geminihelper.ModelName())
 	}
 
 	var transport mcp.Transport
@@ -114,7 +126,7 @@ func main() {
 	// Create LLMAgent with MCP tool set
 	a, err := llmagent.New(llmagent.Config{
 		Name:        "helper_agent",
-		Model:       model,
+		Model:       llm,
 		Description: "Helper agent.",
 		Instruction: "You are a helpful assistant that helps users with various tasks.",
 		Toolsets: []tool.Toolset{
